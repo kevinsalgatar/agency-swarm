@@ -1,141 +1,59 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from typing import List, Dict
-from tools.JobDescriptionTool import JobDescriptionTool
-from tools.TagGenerationTool import TagGenerationTool
-from tools.PostApiTool import PostApiTool
+from typing import Optional, List
+from tools.FetchCompanyDataTool import FetchCompanyDataTool
 import logging
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
 
-# In-memory storage for job descriptions and tags
-database = {
-    "job_descriptions": [],
-    "tags": []
-}
+class CompanyResponse(BaseModel):
+    id: Optional[int] = None
+    name: Optional[str] = None
+    about: Optional[str] = None
+    location: Optional[str] = None
+    companyUrl: Optional[str] = None
+    companyLogoUrl: Optional[str] = None
+    companyBannerUrl: Optional[str] = None
+    galleries: Optional[List[str]] = None
 
-# Pydantic models for request and response
-class JobDescriptionRequest(BaseModel):
-    company_profile_url: str
-    job_details_url: str
-    bearer_token: str
+@app.get("/fetch-company-data", response_model=CompanyResponse)
+async def fetch_company_data(company_url: str = Query(...), bearer_token: str = Query(...)):
+    logging.info(f"Received request with company_url: {company_url} and bearer_token: {bearer_token}")
 
-class JobDescriptionResponse(BaseModel):
-    description: str
-    tags: List[Dict[str, List[str]]]
+    fetch_tool = FetchCompanyDataTool(company_url=company_url, bearer_token=bearer_token)
+    result = fetch_tool.run()
+    
+    logging.info(f"Fetched data: {result}")
 
-class TagGenerationRequest(BaseModel):
-    job_description: str
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
 
-class TagGenerationResponse(BaseModel):
-    tags: List[Dict[str, List[str]]]
-
-class PostJobRequest(BaseModel):
-    job_description: str
-    tags: List[Dict[str, List[str]]]
-    api_endpoint: str
-    bearer_token: str
-
-class PostJobResponse(BaseModel):
-    result: dict
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-@app.get ("/")
-def root():
-    return {"message": "Hello, please visit /docs to see the API documentation."}
-
-@app.post("/generate-job-description/", response_model=JobDescriptionResponse)
-def generate_job_description(request: JobDescriptionRequest):
     try:
-        logger.info("Generating job description...")
-        
-        # Generate job description
-        job_description_tool = JobDescriptionTool(
-            company_profile_url=request.company_profile_url,
-            job_details_url=request.job_details_url,
-            bearer_token=request.bearer_token
+        # Extract the nested 'data' field
+        data = result.get("data", {})
+
+        # Log the extracted data for debugging purposes
+        logging.info(f"Extracted data: {data}")
+
+        company_response = CompanyResponse(
+            id=data.get("id"),
+            name=data.get("name"),
+            about=data.get("about"),
+            location=data.get("location"),
+            companyUrl=data.get("companyUrl"),
+            companyLogoUrl=data.get("companyLogoUrl"),
+            companyBannerUrl=data.get("companyBannerUrl"),
+            galleries=data.get("galleries", [])
         )
-        job_description = job_description_tool.run()
-        logger.info(f"Job description generated: {job_description}")
-        
-        # Generate tags
-        tag_tool = TagGenerationTool(job_description=job_description)
-        tags = tag_tool.run()
-        logger.info(f"Tags generated: {tags}")
-        
-        # Store in in-memory database
-        database["job_descriptions"].append(job_description)
-        database["tags"].append(tags)
-        
-        return JobDescriptionResponse(description=job_description, tags=tags)
+        return company_response
+    except KeyError as e:
+        logging.error(f"Missing key in response data: {e}")
+        raise HTTPException(status_code=500, detail=f"Missing key in response data: {e}")
+    except TypeError as e:
+        logging.error(f"Type error in response data: {e}")
+        raise HTTPException(status_code=500, detail=f"Type error in response data: {e}")
     except Exception as e:
-        logger.error(f"Error generating job description: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/post-job/", response_model=PostJobResponse)
-def post_job(request: PostJobRequest):
-    try:
-        logger.info("Posting job...")
-        
-        # Post job description and tags
-        post_tool = PostApiTool(
-            job_description=request.job_description,
-            tags=request.tags,
-            api_endpoint=request.api_endpoint,
-            bearer_token=request.bearer_token
-        )
-        result = post_tool.run()
-        logger.info(f"Job posted with result: {result}")
-        
-        return PostJobResponse(result=result)
-    except Exception as e:
-        logger.error(f"Error posting job: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/jobs/", response_model=List[JobDescriptionResponse])
-def get_jobs():
-    try:
-        logger.info("Fetching all jobs...")
-        
-        jobs = []
-        for desc, tags in zip(database["job_descriptions"], database["tags"]):
-            jobs.append(JobDescriptionResponse(description=desc, tags=tags))
-        
-        logger.info(f"Jobs fetched: {jobs}")
-        return jobs
-    except Exception as e:
-        logger.error(f"Error fetching jobs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/job-descriptions/", response_model=List[str])
-def get_job_descriptions():
-    try:
-        logger.info("Fetching job descriptions...")
-        
-        job_descriptions = database["job_descriptions"]
-        logger.info(f"Job descriptions fetched: {job_descriptions}")
-        
-        return job_descriptions
-    except Exception as e:
-        logger.error(f"Error fetching job descriptions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/tags/", response_model=List[Dict[str, List[str]]])
-def get_tags():
-    try:
-        logger.info("Fetching tags...")
-        
-        tags = database["tags"]
-        logger.info(f"Tags fetched: {tags}")
-        
-        return tags
-    except Exception as e:
-        logger.error(f"Error fetching tags: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+        logging.error(f"Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
