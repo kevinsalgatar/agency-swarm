@@ -1,6 +1,6 @@
 from agency_swarm.tools import BaseTool
 from pydantic import Field
-from typing import Dict
+from typing import Dict, Any
 import logging
 
 class GenerateJobDescriptionTool(BaseTool):
@@ -8,8 +8,8 @@ class GenerateJobDescriptionTool(BaseTool):
     Tool to generate an attractive job description based on company and job details.
     The tool formats the input data into a compelling job description.
     """
-    company_details: Dict = Field(..., description="The details of the company.")
-    job_details: Dict = Field(..., description="The details of the job.")
+    company_details: Dict[str, Any] = Field(..., description="The details of the company.")
+    job_details: Dict[str, Any] = Field(..., description="The details of the job.")
 
     def run(self) -> str:
         """
@@ -17,13 +17,20 @@ class GenerateJobDescriptionTool(BaseTool):
         This method formats the company and job details into an attractive job description.
         """
         try:
+            # Ensure all required fields are present
+            if not all(key in self.company_details for key in ["name", "description", "values"]):
+                raise ValueError("Missing required company details.")
+            if not all(key in self.job_details for key in ["title", "location", "requirements", "responsibilities"]):
+                raise ValueError("Missing required job details.")
+            
             # Extract relevant details from the input data
-            company_name = self.company_details.get("name", "Company Name")
-            company_description = self.company_details.get("description", "Company Description")
-            job_title = self.job_details.get("title", "Job Title")
-            job_location = self.job_details.get("location", "Job Location")
-            job_requirements = self.job_details.get("requirements", "Job Requirements")
-            job_responsibilities = self.job_details.get("responsibilities", "Job Responsibilities")
+            company_name = self.company_details["name"]
+            company_description = self.company_details["description"]
+            company_values = self.company_details["values"]
+            job_title = self.job_details["title"]
+            job_location = self.job_details["location"]
+            job_requirements = self.job_details["requirements"]
+            job_responsibilities = self.job_details["responsibilities"]
             
             logging.info("Generating job description based on provided company and job details.")
 
@@ -43,13 +50,16 @@ class GenerateJobDescriptionTool(BaseTool):
             {job_requirements}
 
             **Why Join Us?**
-            Join {company_name} and be part of a dynamic team that values {self.company_details.get("values", "our values and culture")}.
+            Join {company_name} and be part of a dynamic team that values {company_values}.
             """
 
             logging.info("Job description generated successfully.")
 
             return job_description.strip()
 
+        except ValueError as e:
+            logging.error(f"Validation error: {e}")
+            return f"Validation error: {str(e)}"
         except Exception as e:
             logging.error(f"Error generating job description: {e}")
             return f"Error generating job description: {str(e)}"

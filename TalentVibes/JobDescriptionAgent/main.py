@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
+from tools.GenerateJobDescriptionTool import GenerateJobDescriptionTool
 from tools.FetchJobDetailsTool import FetchJobDetailsTool
 from tools.FetchCompanyDataTool import FetchCompanyDataTool
 import logging
@@ -90,6 +91,11 @@ class JobResponse(BaseModel):
 class JobDetailsRequest(BaseModel):
     job_details_url: str
     bearer_token: str
+    
+class GenerateJobDescriptionRequest(BaseModel):
+    company_url: str
+    job_details_url: str
+    bearer_token: str
 @app.get("/fetch-company-data", response_model=CompanyResponse)
 async def fetch_company_data(company_url: str = Query(...), bearer_token: str = Query(...)):
     logging.info(f"Received request with company_url: {company_url} and bearer_token: {bearer_token}")
@@ -154,3 +160,43 @@ async def fetch_job_details(job_details_url: str = Query(...), bearer_token: str
     except Exception as e:
         logging.error(f"Unexpected error: {e}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+    
+@app.post("/generate-job-description")
+async def generate_job_description(request: GenerateJobDescriptionRequest):
+    logging.info(f"Received request to generate job description with company_url: {request.company_url} and job_details_url: {request.job_details_url}")
+
+    # Fetch company data
+    fetch_company_tool = FetchCompanyDataTool(company_url=request.company_url, bearer_token=request.bearer_token)
+    company_data = fetch_company_tool.run()
+    if "error" in company_data:
+        raise HTTPException(status_code=400, detail=company_data["error"])
+
+    # Fetch job details
+    fetch_job_tool = FetchJobDetailsTool(job_url=request.job_details_url, bearer_token=request.bearer_token)
+    job_data = fetch_job_tool.run()
+    if "error" in job_data:
+        raise HTTPException(status_code=400, detail=job_data["error"])
+
+    # Extract relevant details for GenerateJobDescriptionTool
+    company_details = {
+        "name": company_data.get("name"),
+        "description": company_data.get("about"),
+        "values": "innovation, integrity, and teamwork"  # assuming these are static values; adjust as necessary
+    }
+
+    job_details = {
+        "title": job_data["data"].get("title"),
+        "location": job_data["data"].get("location"),
+        "requirements": job_data["data"].get("roleDetails"),  # assuming roleDetails contains requirements
+        "responsibilities": "Develop and maintain web applications. Collaborate with cross-functional teams."  # assuming these are static responsibilities; adjust as necessary
+    }
+
+    # Generate job description
+    generate_tool = GenerateJobDescriptionTool(company_details=company_details, job_details=job_details)
+    job_description = generate_tool.run()
+
+    if job_description.startswith("Validation error") or job_description.startswith("Error"):
+        raise HTTPException(status_code=500, detail=job_description)
+    
+
+    return {"job_description": job_description}
